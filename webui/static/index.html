@@ -1,0 +1,1345 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>slam_rover live</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #0b0d11; color: #e6edf3; font-family: ui-monospace, Menlo, monospace; }
+  header { padding: 8px 14px; background: #141821; border-bottom: 1px solid #1f2937; display: flex; gap: 18px; align-items: baseline; }
+  header h1 { font-size: 14px; margin: 0; letter-spacing: 0.04em; }
+  header .stat { font-size: 12px; opacity: 0.8; }
+  .grid { display: grid; grid-template-rows: 1fr 400px; height: calc(100vh - 38px); }
+  .map-wrap { position: relative; min-height: 0; }
+  .cams { padding: 6px; display: flex; flex-direction: row; gap: 6px; background: #0f1218; overflow-x: auto; overflow-y: hidden; border-top: 1px solid #1f2937; }
+  .cam { background: #000; border: 1px solid #1f2937; border-radius: 6px; overflow: hidden; flex: 0 0 auto; height: 100%; display: flex; flex-direction: column; }
+  .cam h2 { margin: 0; padding: 4px 8px; font-size: 11px; background: #1f2937; text-transform: uppercase; letter-spacing: 0.08em; }
+  .cam img { display: block; height: calc(100% - 24px); width: auto; max-width: 640px; object-fit: cover; }
+  .cam.det-list-wrap { width: 320px; }
+  .cam.det-list-wrap ul { flex: 1; }
+  #map { background: radial-gradient(circle at 50% 50%, #11161f 0%, #05070b 80%); }
+  .hud { position: absolute; padding: 6px 10px; background: rgba(15,18,24,0.85); border: 1px solid #1f2937; border-radius: 6px; font-size: 12px; }
+  #pose-hud { top: 50px; right: 12px; }
+  #cloud-hud { bottom: 12px; right: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>SLAM_ROVER LIVE</h1>
+  <span class="stat" id="stat-cloud">cloud: 0 pts</span>
+  <span class="stat" id="stat-pose">pose: -</span>
+  <span class="stat" id="stat-fps">map fps: 0</span>
+  <span class="stat" id="stat-target">target: none</span>
+  <span class="stat" id="stat-invest">invest: idle</span>
+  <span style="margin-left:auto;display:flex;gap:6px;align-items:center">
+    <select id="sel-cls" style="background:#1f2937;color:#e6edf3;border:1px solid #2d3a4f;border-radius:4px;padding:3px 8px;font:inherit">
+      <option value="person">person</option>
+      <option value="bicycle">bicycle</option>
+      <option value="car" selected>car</option>
+      <option value="motorcycle">motorcycle</option>
+      <option value="bus">bus</option>
+      <option value="truck">truck</option>
+      <option value="traffic light">traffic light</option>
+      <option value="stop sign">stop sign</option>
+      <option value="bench">bench</option>
+      <option value="dog">dog</option>
+      <option value="cat">cat</option>
+      <option value="chair">chair</option>
+    </select>
+    <button id="btn-investigate" style="background:#3dffaa;color:#0b0d11;border:0;border-radius:4px;padding:3px 10px;font:inherit;font-weight:600;cursor:pointer">investigate</button>
+    <button id="btn-stop-invest" style="background:#1f2937;color:#e6edf3;border:1px solid #2d3a4f;border-radius:4px;padding:3px 10px;font:inherit;cursor:pointer">stop</button>
+    <button id="btn-clear" style="background:#1f2937;color:#e6edf3;border:1px solid #2d3a4f;border-radius:4px;padding:3px 10px;font:inherit;cursor:pointer">clear</button>
+    <span style="border-left:1px solid #2d3a4f;padding-left:8px;margin-left:4px;display:flex;gap:4px">
+      <span style="font-size:11px;color:#7e8a9c;align-self:center">RACE:</span>
+      <button id="btn-square" style="background:#6ad1ff;color:#0b0d11;border:0;border-radius:4px;padding:3px 9px;font:inherit;font-weight:600;cursor:pointer">square</button>
+      <button id="btn-oval" style="background:#6ad1ff;color:#0b0d11;border:0;border-radius:4px;padding:3px 9px;font:inherit;font-weight:600;cursor:pointer">oval</button>
+      <button id="btn-eight" style="background:#6ad1ff;color:#0b0d11;border:0;border-radius:4px;padding:3px 9px;font:inherit;font-weight:600;cursor:pointer">figure8</button>
+      <button id="btn-tour" style="background:#6ad1ff;color:#0b0d11;border:0;border-radius:4px;padding:3px 9px;font:inherit;font-weight:600;cursor:pointer">tour</button>
+      <button id="btn-explore" style="background:#ffd23d;color:#0b0d11;border:0;border-radius:4px;padding:3px 10px;font:inherit;font-weight:700;cursor:pointer" title="frontier-exploration agent">AUTO EXPLORE</button>
+      <button id="btn-save" style="background:#3dffaa;color:#0b0d11;border:0;border-radius:4px;padding:3px 10px;font:inherit;font-weight:700;cursor:pointer" title="save annotated map PNG + landmarks JSON">SAVE MAP</button>
+      <button id="btn-view" style="background:#1f2937;color:#e6edf3;border:1px solid #2d3a4f;border-radius:4px;padding:3px 10px;font:inherit;cursor:pointer" title="view saved maps">VIEW SAVES</button>
+      <button id="btn-mesh-toggle" style="background:#1f2937;color:#e6edf3;border:1px solid #2d3a4f;border-radius:4px;padding:3px 10px;font:inherit;cursor:pointer" title="hide/show TSDF mesh">mesh</button>
+      <button id="btn-cloud-toggle" style="background:#1f2937;color:#e6edf3;border:1px solid #2d3a4f;border-radius:4px;padding:3px 10px;font:inherit;cursor:pointer" title="hide/show voxel cloud">cloud</button>
+      <button id="btn-gt-toggle" style="background:#1f2937;color:#e6edf3;border:1px solid #2d3a4f;border-radius:4px;padding:3px 10px;font:inherit;cursor:pointer" title="overlay gz world ground truth">gz truth</button>
+      <button id="btn-voxmesh-toggle" style="background:#1f2937;color:#e6edf3;border:1px solid #2d3a4f;border-radius:4px;padding:3px 10px;font:inherit;cursor:pointer" title="solid textured voxel cube mesh (Minecraft surface shell)">vox-mesh</button>
+      <button id="btn-topdown" style="background:#1f2937;color:#e6edf3;border:1px solid #2d3a4f;border-radius:4px;padding:3px 10px;font:inherit;cursor:pointer" title="top-down ortho camera">top-down</button>
+      <button id="btn-tri-mesh" style="background:#1f2937;color:#e6edf3;border:1px solid #2d3a4f;border-radius:4px;padding:3px 10px;font:inherit;cursor:pointer" title="marching-cubes surface mesh from voxel cloud">tri-mesh</button>
+      <button id="btn-splat-view" style="background:#1f2937;color:#e6edf3;border:1px solid #2d3a4f;border-radius:4px;padding:3px 10px;font:inherit;cursor:pointer" title="Inria-format Gaussian splat viewer">splat-view</button>
+    </span>
+
+<!-- Saved-maps modal -->
+<div id="saves-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;align-items:center;justify-content:center;flex-direction:column;padding:20px;font-family:inherit;color:#e6edf3">
+  <div style="display:flex;align-items:center;gap:14px;margin-bottom:10px">
+    <strong style="color:#3dffaa;font-size:14px">SAVED MAPS</strong>
+    <select id="saves-select" style="background:#1f2937;color:#e6edf3;border:1px solid #2d3a4f;border-radius:4px;padding:3px 10px;font:inherit"></select>
+    <a id="saves-png-link" target="_blank" style="background:#1f2937;color:#e6edf3;border:1px solid #2d3a4f;border-radius:4px;padding:3px 10px;text-decoration:none">open PNG</a>
+    <a id="saves-json-link" target="_blank" style="background:#1f2937;color:#e6edf3;border:1px solid #2d3a4f;border-radius:4px;padding:3px 10px;text-decoration:none">landmarks JSON</a>
+    <button id="btn-modal-close" style="margin-left:auto;background:#ff5a3d;color:#0b0d11;border:0;border-radius:4px;padding:4px 14px;font:inherit;font-weight:700;cursor:pointer">close</button>
+  </div>
+  <img id="saves-img" alt="saved map" style="max-width:90vw;max-height:75vh;background:#0b0d11;border:1px solid #2d3a4f;border-radius:6px;image-rendering:pixelated"/>
+  <pre id="saves-meta" style="background:#0f1218;border:1px solid #1f2937;border-radius:6px;padding:10px 14px;margin-top:12px;max-width:90vw;max-height:18vh;overflow:auto;font-size:11px;color:#9bb0c8;width:90vw">landmarks load…</pre>
+</div>
+  </span>
+</header>
+<div class="grid">
+  <div class="map-wrap">
+    <canvas id="map" style="width:100%;height:100%;display:block"></canvas>
+    <div class="hud" id="pose-hud">x: 0.00 m<br>y: 0.00 m<br>yaw: 0.0°</div>
+    <div class="hud" id="minimap-hud" style="top:340px;left:12px;padding:6px;display:flex;flex-direction:column;align-items:center;gap:4px;min-width:300px">
+      <div style="display:flex;gap:6px;align-items:center">
+        <strong style="color:#3dffaa;font-size:11px">LIVE MAP</strong>
+        <button id="btn-mini-toggle" style="background:#1f2937;color:#e6edf3;border:1px solid #2d3a4f;border-radius:3px;padding:0 7px;font:inherit;cursor:pointer;font-size:11px">hide</button>
+      </div>
+      <canvas id="minimap" width="300" height="300" style="image-rendering:pixelated;background:#05070b;border:1px solid #1f2937;border-radius:4px"></canvas>
+    </div>
+    <div class="hud" id="cloud-hud">drag = orbit · wheel = zoom · right-drag = pan · double-click = plan + goto</div>
+    <div class="hud" id="cfg-hud" style="top:50px;left:12px;min-width:300px;font-size:11px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px"><strong style="color:#3dffaa">TRACKING CONFIG</strong><button id="cfg-reset" style="background:#1f2937;color:#e6edf3;border:1px solid #2d3a4f;border-radius:3px;padding:1px 6px;font:inherit;cursor:pointer">reset</button></div>
+      <div id="cfg-rows"></div>
+    </div>
+  </div>
+  <div class="cams">
+    <div class="cam"><h2>front fisheye</h2><img src="/front.mjpeg" alt="front"/></div>
+    <div class="cam"><h2>yolo11n · front</h2><img src="http://localhost:8081/front/detect.mjpeg" alt="detect-front"/></div>
+    <div class="cam"><h2>rear fisheye</h2><img src="/rear.mjpeg" alt="rear"/></div>
+    <div class="cam"><h2>yolo11n · rear</h2><img src="http://localhost:8081/rear/detect.mjpeg" alt="detect-rear"/></div>
+    <div class="cam det-list-wrap" style="background:#0f1218">
+      <h2>detections</h2>
+      <ul id="det-list" style="margin:0;padding:6px 12px;list-style:none;font-size:12px;color:#9bb0c8;overflow:auto"></ul>
+    </div>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.166.1/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.166.1/examples/jsm/",
+    "PLYLoader": "https://unpkg.com/three@0.166.1/examples/jsm/loaders/PLYLoader.js",
+    "@mkkellogg/gaussian-splats-3d": "https://unpkg.com/@mkkellogg/gaussian-splats-3d@latest/build/gaussian-splats-3d.module.js"
+  }
+}
+</script>
+<script type="module">
+  import * as THREE from 'three';
+  import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+  import { PLYLoader } from 'three/addons/loaders/PLYLoader.js';
+
+  const canvas = document.getElementById('map');
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setPixelRatio(window.devicePixelRatio);
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x05070b);
+
+  const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 500);
+  camera.position.set(8, 10, 8);
+  camera.up.set(0, 0, 1); // z-up to match world frame
+
+  const controls = new OrbitControls(camera, canvas);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+
+  // Lighting / scene aids
+  scene.add(new THREE.AmbientLight(0xffffff, 0.35));
+  const dir = new THREE.DirectionalLight(0xffffff, 0.7);
+  dir.position.set(10, 10, 20);
+  scene.add(dir);
+  const grid = new THREE.GridHelper(40, 40, 0x223040, 0x131a25);
+  grid.rotation.x = Math.PI / 2;  // grid on XY plane
+  scene.add(grid);
+  const axes = new THREE.AxesHelper(1.0);
+  scene.add(axes);
+
+  // Rover marker — true-to-scale rover_360cam geometry
+  // Body: 0.55 × 0.45 × 0.20 m chassis (matches SDF base_link visual)
+  // Wheels: 4× cylinder radius 0.10, length 0.10 at corners
+  // Heading arrow + class label sprite on top
+  const rover = new THREE.Group();
+  // Chassis
+  const chassisGeom = new THREE.BoxGeometry(0.55, 0.45, 0.20);
+  const chassisMat = new THREE.MeshStandardMaterial({ color: 0xff7733, emissive: 0x331100, roughness: 0.6 });
+  const chassis = new THREE.Mesh(chassisGeom, chassisMat);
+  chassis.position.z = 0.15;
+  rover.add(chassis);
+  // 4 wheels
+  const wheelGeom = new THREE.CylinderGeometry(0.10, 0.10, 0.10, 16);
+  wheelGeom.rotateX(Math.PI / 2);
+  const wheelMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.9 });
+  const wheelPositions = [
+    [ 0.20,  0.25, 0.10], [ 0.20, -0.25, 0.10],
+    [-0.20,  0.25, 0.10], [-0.20, -0.25, 0.10],
+  ];
+  for (const [x,y,z] of wheelPositions) {
+    const w = new THREE.Mesh(wheelGeom, wheelMat);
+    w.position.set(x, y, z);
+    rover.add(w);
+  }
+  // Heading arrow (small triangle on top, pointing +X = forward)
+  const arrowGeom = new THREE.ConeGeometry(0.07, 0.20, 8);
+  arrowGeom.rotateZ(-Math.PI / 2);
+  const arrowMat = new THREE.MeshStandardMaterial({ color: 0xffee33, emissive: 0x442200 });
+  const arrow = new THREE.Mesh(arrowGeom, arrowMat);
+  arrow.position.set(0.25, 0, 0.32);
+  rover.add(arrow);
+  // 360 cam sphere on top
+  const cam = new THREE.Mesh(
+    new THREE.SphereGeometry(0.06, 12, 8),
+    new THREE.MeshStandardMaterial({ color: 0x66ccff, emissive: 0x113344 })
+  );
+  cam.position.set(0, 0, 0.40);
+  rover.add(cam);
+  // Class label sprite ("ROVER_360CAM" floating above)
+  const labelCanvas = document.createElement('canvas');
+  labelCanvas.width = 256; labelCanvas.height = 64;
+  const lctx = labelCanvas.getContext('2d');
+  lctx.fillStyle = 'rgba(11,13,17,0.85)';
+  lctx.fillRect(0, 0, 256, 64);
+  lctx.strokeStyle = '#ff7733';
+  lctx.lineWidth = 3;
+  lctx.strokeRect(2, 2, 252, 60);
+  lctx.fillStyle = '#ffffff';
+  lctx.font = 'bold 28px ui-monospace, Menlo, monospace';
+  lctx.textAlign = 'center';
+  lctx.textBaseline = 'middle';
+  lctx.fillText('ROVER_360CAM', 128, 32);
+  const labelTex = new THREE.CanvasTexture(labelCanvas);
+  const labelSpriteMat = new THREE.SpriteMaterial({ map: labelTex, transparent: true });
+  const labelSprite = new THREE.Sprite(labelSpriteMat);
+  labelSprite.scale.set(1.2, 0.3, 1);
+  labelSprite.position.set(0, 0, 0.85);
+  rover.add(labelSprite);
+  scene.add(rover);
+
+  // Trajectory polyline
+  const trajGeom = new THREE.BufferGeometry();
+  const trajPos = new Float32Array(20000 * 3);
+  trajGeom.setAttribute('position', new THREE.BufferAttribute(trajPos, 3));
+  trajGeom.setDrawRange(0, 0);
+  const trajMat = new THREE.LineBasicMaterial({ color: 0xffaa3d });
+  const trajLine = new THREE.Line(trajGeom, trajMat);
+  scene.add(trajLine);
+  let trajCount = 0;
+
+  // Occupancy grid texture (200x200). Drawn as a flat plane below the cloud.
+  const gridCanvas = document.createElement('canvas');
+  gridCanvas.width = 200; gridCanvas.height = 200;
+  const gridCtx = gridCanvas.getContext('2d');
+  const gridTex = new THREE.CanvasTexture(gridCanvas);
+  gridTex.magFilter = THREE.NearestFilter;
+  gridTex.minFilter = THREE.NearestFilter;
+  const gridMat = new THREE.MeshBasicMaterial({
+    map: gridTex, transparent: true, opacity: 0.85, depthWrite: false,
+  });
+  const gridGeom = new THREE.PlaneGeometry(20, 20);
+  const gridPlane = new THREE.Mesh(gridGeom, gridMat);
+  gridPlane.position.set(0, 0, 0.02);   // just above grid helper
+  scene.add(gridPlane);
+
+  // Planned path polyline
+  const pathGeom = new THREE.BufferGeometry();
+  pathGeom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(0), 3));
+  const pathMat = new THREE.LineBasicMaterial({ color: 0x3dffaa, linewidth: 2 });
+  const pathLine = new THREE.Line(pathGeom, pathMat);
+  scene.add(pathLine);
+
+  // ----- Ground truth overlay (gz world SDF) -----
+  // Renders the *real* world geometry as semi-transparent wireframe boxes /
+  // cylinders so user can visually compare the rover-mapped point cloud /
+  // mesh against ground truth side-by-side in the same 3D scene.
+  const gtGroup = new THREE.Group();
+  gtGroup.visible = false;   // off by default; toggle via header button
+  scene.add(gtGroup);
+  function gtMaterial(rgb, alpha = 0.18) {
+    return new THREE.MeshStandardMaterial({
+      color: new THREE.Color(rgb[0]/255, rgb[1]/255, rgb[2]/255),
+      transparent: true, opacity: alpha,
+      wireframe: false, side: THREE.DoubleSide,
+    });
+  }
+  function gtEdges(geom, rgb) {
+    const e = new THREE.EdgesGeometry(geom);
+    return new THREE.LineSegments(e,
+      new THREE.LineBasicMaterial({ color: new THREE.Color(rgb[0]/255, rgb[1]/255, rgb[2]/255) }));
+  }
+  async function loadGroundTruth() {
+    try {
+      const j = await (await fetch('/ground_truth.json')).json();
+      const addBox = (pose, size, rgb) => {
+        const g = new THREE.BoxGeometry(size[0], size[1], size[2]);
+        const m = new THREE.Mesh(g, gtMaterial(rgb));
+        m.position.set(pose[0], pose[1], pose[2]);
+        gtGroup.add(m);
+        gtGroup.add(gtEdges(g, rgb).translateX(pose[0]).translateY(pose[1]).translateZ(pose[2]));
+      };
+      (j.walls || []).forEach(w => addBox(w.pose, w.size, w.color));
+      (j.obstacles || []).forEach(o => {
+        if (o.cls === 'pillar') {
+          const g = new THREE.CylinderGeometry(o.radius, o.radius, o.height, 24);
+          g.rotateX(Math.PI/2);
+          const m = new THREE.Mesh(g, gtMaterial(o.color));
+          m.position.set(o.pose[0], o.pose[1], o.pose[2]);
+          gtGroup.add(m);
+        } else {
+          addBox(o.pose, o.size, o.color);
+        }
+      });
+      (j.spawned || []).forEach(s => {
+        // Render at object centre (z = size/2 above ground)
+        const z = (s.size && s.size[2]) ? s.size[2] / 2 : 0.5;
+        addBox([s.pose[0], s.pose[1], z], s.size, s.color);
+        // Big floating label so user can match against detected landmarks
+        const cv = document.createElement('canvas');
+        cv.width = 256; cv.height = 64;
+        const cx = cv.getContext('2d');
+        cx.fillStyle = 'rgba(20,25,35,0.85)'; cx.fillRect(0,0,256,64);
+        cx.font = 'bold 32px monospace';
+        cx.fillStyle = '#3dffaa';
+        cx.fillText(`GT:${s.cls}`, 8, 42);
+        const tex = new THREE.CanvasTexture(cv);
+        const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex }));
+        sp.scale.set(1.2, 0.3, 1);
+        sp.position.set(s.pose[0], s.pose[1], z + (s.size?.[2] || 0.5)/2 + 0.3);
+        gtGroup.add(sp);
+      });
+      console.log('[gt] loaded', gtGroup.children.length, 'gt items');
+    } catch(e) { console.warn('[gt] err', e); }
+  }
+  loadGroundTruth();
+  document.getElementById('btn-gt-toggle').addEventListener('click', () => {
+    gtGroup.visible = !gtGroup.visible;
+  });
+  // Vox-mesh toggle: hide point cloud, show solid voxel cubes.
+  document.getElementById('btn-voxmesh-toggle').addEventListener('click', () => {
+    const meshOn = !voxelMesh.visible;
+    voxelMesh.visible = meshOn;
+    cloud.visible = !meshOn;
+    document.getElementById('btn-voxmesh-toggle').style.background = meshOn ? '#3dffaa' : '#1f2937';
+    document.getElementById('btn-voxmesh-toggle').style.color = meshOn ? '#0b0d11' : '#e6edf3';
+  });
+
+  // Top-down ortho camera toggle (SA-LOAM style figure framing)
+  let topdownMode = false;
+  const savedCamPos = new THREE.Vector3();
+  const savedCamUp = new THREE.Vector3();
+  const orbitTarget = new THREE.Vector3();
+  document.getElementById('btn-topdown').addEventListener('click', () => {
+    topdownMode = !topdownMode;
+    if (topdownMode) {
+      savedCamPos.copy(camera.position);
+      savedCamUp.copy(camera.up);
+      orbitTarget.copy(controls.target);
+      camera.up.set(0, 1, 0);
+      camera.position.set(0, 0, 18);
+      controls.target.set(0, 0, 0);
+    } else {
+      camera.up.copy(savedCamUp);
+      camera.position.copy(savedCamPos);
+      controls.target.copy(orbitTarget);
+    }
+    controls.update();
+  });
+
+  // ----- TSDF Mesh layer (Open3D photogrammetry-style fused mesh) -----
+  // Loads /tri_mesh.ply periodically (built by tsdf_builder.py). Disposes prior
+  // mesh on replace. Toggle button hides/shows.
+  let tsdfMesh = null;
+  let lastMeshETag = '';
+  const plyLoader = new PLYLoader();
+  async function refreshMesh() {
+    try {
+      // HEAD to compare Content-Length (cheap freshness check)
+      const h = await fetch('/tri_mesh.ply', { method: 'HEAD' });
+      const etag = (h.headers.get('Content-Length') || '') + '-' +
+                   (h.headers.get('Last-Modified') || '');
+      if (etag === lastMeshETag) { setTimeout(refreshMesh, 8000); return; }
+      lastMeshETag = etag;
+      const r = await fetch('/tri_mesh.ply');
+      if (!r.ok) { setTimeout(refreshMesh, 8000); return; }
+      const buf = await r.arrayBuffer();
+      const geom = plyLoader.parse(buf);
+      geom.computeVertexNormals();
+      const mat = new THREE.MeshStandardMaterial({
+        vertexColors: !!geom.getAttribute('color'),
+        color: geom.getAttribute('color') ? 0xffffff : 0x9bb0c8,
+        flatShading: false, roughness: 0.85, metalness: 0.05,
+        side: THREE.DoubleSide,
+      });
+      const m = new THREE.Mesh(geom, mat);
+      if (tsdfMesh) {
+        scene.remove(tsdfMesh);
+        tsdfMesh.geometry.dispose();
+        tsdfMesh.material.dispose();
+      }
+      tsdfMesh = m;
+      scene.add(tsdfMesh);
+      const stat = document.getElementById('stat-cloud');
+      if (stat) stat.textContent += `  · mesh: ${(geom.getAttribute('position').count/1000)|0}k verts`;
+      console.log('[mesh] loaded', geom.getAttribute('position').count, 'verts');
+    } catch (e) {
+      console.warn('[mesh] err', e);
+    }
+    setTimeout(refreshMesh, 12000);
+  }
+  refreshMesh();
+
+  // ----- Marching-cubes tri-mesh layer (C++ marching cubes of voxel cloud) -----
+  // Separate from the Open3D TSDF mesh: this one is generated server-side from
+  // the live VoxelCloud at /tri_mesh.ply every 2 s.
+  let triMesh = null;
+  let triMeshOn = false;
+  let triMeshTimer = null;
+  const triPlyLoader = new PLYLoader();
+  async function refreshTriMesh() {
+    try {
+      const r = await fetch('/tri_mesh.ply');
+      if (!r.ok) return;
+      const nv = r.headers.get('X-Tri-Verts');
+      const nf = r.headers.get('X-Tri-Faces');
+      const buf = await r.arrayBuffer();
+      const geom = triPlyLoader.parse(buf);
+      // PLY contains normals; fall back to compute if loader missed them.
+      if (!geom.getAttribute('normal')) geom.computeVertexNormals();
+      const mat = new THREE.MeshStandardMaterial({
+        vertexColors: !!geom.getAttribute('color'),
+        color: geom.getAttribute('color') ? 0xffffff : 0xb0c8e0,
+        flatShading: true, roughness: 0.9, metalness: 0.0,
+        side: THREE.DoubleSide,
+      });
+      const m = new THREE.Mesh(geom, mat);
+      if (triMesh) {
+        scene.remove(triMesh);
+        triMesh.geometry.dispose();
+        triMesh.material.dispose();
+      }
+      triMesh = m;
+      triMesh.visible = triMeshOn;
+      scene.add(triMesh);
+      console.log('[tri-mesh] loaded', nv, 'verts /', nf, 'faces');
+    } catch (e) {
+      console.warn('[tri-mesh] err', e);
+    }
+  }
+  document.getElementById('btn-tri-mesh').addEventListener('click', () => {
+    triMeshOn = !triMeshOn;
+    const btn = document.getElementById('btn-tri-mesh');
+    btn.style.background = triMeshOn ? '#3dffaa' : '#1f2937';
+    btn.style.color = triMeshOn ? '#0b0d11' : '#e6edf3';
+    if (triMeshOn) {
+      refreshTriMesh();
+      if (!triMeshTimer) triMeshTimer = setInterval(refreshTriMesh, 5000);
+    } else {
+      if (triMesh) triMesh.visible = false;
+      if (triMeshTimer) { clearInterval(triMeshTimer); triMeshTimer = null; }
+    }
+  });
+
+  // Landmark group — remembers classes & positions detected during run
+  const landmarkGroup = new THREE.Group();
+  scene.add(landmarkGroup);
+  const CLASS_COLORS = {
+    person: 0xff5a3d, car: 0x3dffaa, bicycle: 0xffd23d,
+    motorcycle: 0xffd23d, bus: 0x3dffaa, truck: 0x3dffaa,
+    'traffic light': 0xff3d8a, 'stop sign': 0xff3d8a,
+    'fire hydrant': 0xff3d3d, bench: 0xd2a070, dog: 0xff8a3d,
+    cat: 0xff8a3d, chair: 0x70b8d2, cone: 0xff8800, box: 0x886644,
+  };
+  function makeLabelSprite(text, color) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256; canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    ctx.fillRect(0, 0, 256, 64);
+    ctx.font = 'bold 36px monospace';
+    ctx.fillStyle = '#'+color.toString(16).padStart(6, '0');
+    ctx.fillText(text, 8, 44);
+    const tex = new THREE.CanvasTexture(canvas);
+    const mat = new THREE.SpriteMaterial({ map: tex });
+    const sprite = new THREE.Sprite(mat);
+    sprite.scale.set(1.2, 0.3, 1);
+    return sprite;
+  }
+  // Target marker (flag)
+  const targetGroup = new THREE.Group();
+  const targetPole = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.03, 0.03, 1.2, 8),
+    new THREE.MeshStandardMaterial({ color: 0x3dffaa }));
+  targetPole.position.z = 0.6;
+  targetPole.rotation.x = Math.PI / 2;
+  const targetFlag = new THREE.Mesh(
+    new THREE.BoxGeometry(0.5, 0.05, 0.3),
+    new THREE.MeshStandardMaterial({ color: 0x3dffaa, emissive: 0x062c20 }));
+  targetFlag.position.set(0.25, 0, 0.9);
+  targetGroup.add(targetPole);
+  targetGroup.add(targetFlag);
+  targetGroup.visible = false;
+  scene.add(targetGroup);
+
+  // Double-click ground plane => plan path on local map + execute
+  const raycaster = new THREE.Raycaster();
+  const ndc = new THREE.Vector2();
+  const groundPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+  async function planAtPointer(ev) {
+    const rect = canvas.getBoundingClientRect();
+    ndc.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+    ndc.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(ndc, camera);
+    const hit = new THREE.Vector3();
+    if (raycaster.ray.intersectPlane(groundPlane, hit)) {
+      console.log('[ui] plan to', hit.x.toFixed(2), hit.y.toFixed(2));
+      const r = await fetch(`/plan?x=${hit.x.toFixed(3)}&y=${hit.y.toFixed(3)}`,
+                            {method: 'POST'});
+      const j = await r.json();
+      if (!j.ok) console.warn('plan failed', j);
+    }
+  }
+  canvas.addEventListener('dblclick', planAtPointer);
+  // Also accept shift+click as fallback
+  canvas.addEventListener('pointerdown', (ev) => {
+    if (ev.shiftKey) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      setTargetAtPointer(ev);
+    }
+  }, true);
+  document.getElementById('btn-clear').addEventListener('click', () => {
+    fetch('/target?clear=1', {method:'POST'});
+  });
+  document.getElementById('btn-investigate').addEventListener('click', () => {
+    const cls = document.getElementById('sel-cls').value;
+    fetch(`/investigate?cls=${encodeURIComponent(cls)}`, {method:'POST'});
+  });
+  document.getElementById('btn-stop-invest').addEventListener('click', () => {
+    fetch('/investigate?clear=1', {method:'POST'});
+    fetch('/path/clear', {method:'POST'});
+  });
+  ['square','oval','eight','tour'].forEach(p => {
+    document.getElementById('btn-' + p).addEventListener('click', () => {
+      fetch(`/path/preset?p=${p}`, {method:'POST'});
+    });
+  });
+  document.getElementById('btn-explore').addEventListener('click', () => {
+    // Just request a single frontier plan; user can click again to step.
+    fetch('/explore/step', {method:'POST'});
+  });
+  document.getElementById('btn-save').addEventListener('click', async () => {
+    const r = await fetch('/save', {method:'POST'});
+    const j = await r.json();
+    if (j.ok) {
+      // Auto-pop the viewer with the freshly saved snapshot
+      await refreshSavesList();
+      const sel = document.getElementById('saves-select');
+      sel.selectedIndex = 0;   // newest is first
+      loadSelectedSave();
+      document.getElementById('saves-modal').style.display = 'flex';
+    } else {
+      alert('save failed');
+    }
+  });
+
+  async function refreshSavesList() {
+    const j = await (await fetch('/saves.json')).json();
+    const sel = document.getElementById('saves-select');
+    sel.innerHTML = '';
+    (j.items || []).forEach(name => {
+      const opt = document.createElement('option');
+      opt.value = name; opt.textContent = name;
+      sel.appendChild(opt);
+    });
+    if (sel.options.length === 0) {
+      const opt = document.createElement('option');
+      opt.textContent = '(no saves yet)'; opt.disabled = true;
+      sel.appendChild(opt);
+    }
+  }
+  async function loadSelectedSave() {
+    const sel = document.getElementById('saves-select');
+    const name = sel.value;
+    if (!name) return;
+    const png = `/saves/${name}/map.png?t=${Date.now()}`;
+    const jsonURL = `/saves/${name}/landmarks.json?t=${Date.now()}`;
+    document.getElementById('saves-img').src = png;
+    document.getElementById('saves-png-link').href = png;
+    document.getElementById('saves-json-link').href = jsonURL;
+    try {
+      const meta = await (await fetch(jsonURL)).json();
+      const items = meta.landmarks || [];
+      if (items.length === 0) {
+        document.getElementById('saves-meta').textContent = '(no landmarks)';
+      } else {
+        document.getElementById('saves-meta').textContent =
+          items.map(l => `${l.cls.padEnd(14)} (${l.x.toFixed(2)}, ${l.y.toFixed(2)})  hits=${l.count}`).join('\n');
+      }
+    } catch (e) {
+      document.getElementById('saves-meta').textContent = 'failed to load landmarks';
+    }
+  }
+  // Live 2D top-down minimap (matches saved-PNG style but real-time).
+  const mini = document.getElementById('minimap');
+  const mctx = mini.getContext('2d');
+  let miniVisible = true;
+  let mapMetaCached = null;
+  async function ensureMapMeta() {
+    if (mapMetaCached) return mapMetaCached;
+    try { mapMetaCached = await (await fetch('/map_meta.json')).json(); } catch(e) {}
+    return mapMetaCached;
+  }
+  function classColor(cls) {
+    if (cls === 'person')      return '#ff5a3d';
+    if (cls === 'car' || cls === 'truck' || cls === 'bus') return '#3dffaa';
+    if (cls === 'cone')        return '#ff8800';
+    if (cls === 'bicycle' || cls === 'motorcycle') return '#ffd23d';
+    if (cls === 'stop sign')   return '#ff3d8a';
+    return '#cccccc';
+  }
+  async function drawMinimap() {
+    if (!miniVisible) { setTimeout(drawMinimap, 1500); return; }
+    try {
+      const meta = await ensureMapMeta();
+      if (!meta) { setTimeout(drawMinimap, 800); return; }
+      const W = meta.w, H = meta.h, res = meta.res, OX = meta.origin_x, OY = meta.origin_y;
+      const cv = mini, ctx = mctx;
+      const px = cv.width;
+      const sc = px / W;  // canvas px per cell
+      // Background
+      ctx.fillStyle = '#05070b'; ctx.fillRect(0, 0, cv.width, cv.height);
+      // Occupancy
+      const buf = await (await fetch('/map.bin')).arrayBuffer();
+      const arr = new Int8Array(buf);
+      const img = ctx.createImageData(W, H);
+      for (let j = 0; j < H; j++) {
+        for (let i = 0; i < W; i++) {
+          const v = arr[j * W + i];
+          let r=30, g=33, b=44, a=255;
+          if (v === 100)      { r=230; g=60; b=60; }
+          else if (v === 0)   { r=80;  g=140; b=100; }
+          const dst = ((H - 1 - j) * W + i) * 4;
+          img.data[dst] = r; img.data[dst+1] = g; img.data[dst+2] = b; img.data[dst+3] = a;
+        }
+      }
+      // Paint into temp small canvas then stretch up
+      const tmp = document.createElement('canvas');
+      tmp.width = W; tmp.height = H;
+      tmp.getContext('2d').putImageData(img, 0, 0);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(tmp, 0, 0, cv.width, cv.height);
+
+      // World -> canvas px
+      const w2p = (wx, wy) => {
+        const i = (wx - OX) / res;
+        const j = (wy - OY) / res;
+        return [i * sc, cv.height - j * sc];
+      };
+
+      // Trajectory (from accumulated traj points kept in ThreeJS would be best,
+      // but simpler: skip — rover marker is enough).
+
+      // Planned path (if active)
+      try {
+        const pj = await (await fetch('/path.json')).json();
+        if (pj.active && pj.waypoints && pj.waypoints.length >= 2) {
+          ctx.strokeStyle = '#3dffaa'; ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          const [u0, v0] = w2p(pj.waypoints[0][0], pj.waypoints[0][1]);
+          ctx.moveTo(u0, v0);
+          for (let k = 1; k < pj.waypoints.length; k++) {
+            const [u, v] = w2p(pj.waypoints[k][0], pj.waypoints[k][1]);
+            ctx.lineTo(u, v);
+          }
+          ctx.stroke();
+        }
+      } catch (e) {}
+
+      // Landmarks
+      try {
+        const lj = await (await fetch('/landmarks.json')).json();
+        (lj.items || []).forEach(l => {
+          const [u, v] = w2p(l.x, l.y);
+          ctx.fillStyle = classColor(l.cls);
+          ctx.beginPath(); ctx.arc(u, v, 4, 0, Math.PI*2); ctx.fill();
+          ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.stroke();
+          ctx.font = '10px monospace';
+          const label = `${l.cls}`;
+          const lx = u + 6, ly = v - 3;
+          ctx.fillStyle = '#000'; ctx.fillText(label, lx + 0.5, ly + 0.5);
+          ctx.fillStyle = classColor(l.cls); ctx.fillText(label, lx, ly);
+        });
+      } catch (e) {}
+
+      // Rover
+      try {
+        const pj = await (await fetch('/pose.json')).json();
+        const [u, v] = w2p(pj.x, pj.y);
+        const yaw = Math.atan2(2*(pj.qw*pj.qz + pj.qx*pj.qy),
+                               1 - 2*(pj.qy*pj.qy + pj.qz*pj.qz));
+        ctx.save();
+        ctx.translate(u, v);
+        ctx.rotate(-yaw);  // canvas y is flipped vs world
+        ctx.fillStyle = '#6ad1ff';
+        ctx.beginPath();
+        ctx.moveTo(8, 0); ctx.lineTo(-6, 5); ctx.lineTo(-6, -5); ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.stroke();
+        ctx.restore();
+      } catch (e) {}
+
+      // Border + scale label
+      ctx.strokeStyle = '#1f2937';
+      ctx.strokeRect(0, 0, cv.width, cv.height);
+      ctx.fillStyle = '#9bb0c8'; ctx.font = '10px monospace';
+      ctx.fillText('20×20 m', 5, cv.height - 5);
+    } catch (e) { /* swallow */ }
+    setTimeout(drawMinimap, 500);
+  }
+  document.getElementById('btn-mesh-toggle').addEventListener('click', () => {
+    if (tsdfMesh) tsdfMesh.visible = !tsdfMesh.visible;
+  });
+  document.getElementById('btn-cloud-toggle').addEventListener('click', () => {
+    cloud.visible = !cloud.visible;
+  });
+  document.getElementById('btn-mini-toggle').addEventListener('click', () => {
+    miniVisible = !miniVisible;
+    mini.style.display = miniVisible ? '' : 'none';
+    document.getElementById('btn-mini-toggle').textContent = miniVisible ? 'hide' : 'show';
+  });
+  drawMinimap();
+
+  document.getElementById('btn-view').addEventListener('click', async () => {
+    await refreshSavesList();
+    if (document.getElementById('saves-select').options.length > 0 &&
+        !document.getElementById('saves-select').options[0].disabled) {
+      loadSelectedSave();
+    }
+    document.getElementById('saves-modal').style.display = 'flex';
+  });
+  document.getElementById('saves-select').addEventListener('change', loadSelectedSave);
+  document.getElementById('btn-modal-close').addEventListener('click', () => {
+    document.getElementById('saves-modal').style.display = 'none';
+  });
+
+  // Pointcloud
+  const cloudGeom = new THREE.BufferGeometry();
+  cloudGeom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(0), 3));
+  // Subtle ambient-occlusion-like shading: darken low-z splats slightly so
+  // floor/ground reads as ground and elevated objects pop. We do this in JS
+  // by per-vertex multiplying alpha after fetch (cheaper than a custom shader).
+
+  // Soft round splat texture (no library needed, drawn to canvas)
+  const splatCanvas = document.createElement('canvas');
+  splatCanvas.width = splatCanvas.height = 64;
+  {
+    const c = splatCanvas.getContext('2d');
+    const g = c.createRadialGradient(32, 32, 0, 32, 32, 32);
+    g.addColorStop(0.0, 'rgba(255,255,255,1.0)');
+    g.addColorStop(0.55, 'rgba(255,255,255,0.85)');
+    g.addColorStop(0.85, 'rgba(255,255,255,0.30)');
+    g.addColorStop(1.0,  'rgba(255,255,255,0.0)');
+    c.fillStyle = g; c.fillRect(0, 0, 64, 64);
+  }
+  const splatTex = new THREE.CanvasTexture(splatCanvas);
+
+  // Custom shader: each voxel rendered as screen-space Gaussian splat with
+  // exp(-2r²) falloff. Photogrammetry-quality look from sparse XYZRGB voxels.
+  const VERT_SRC = `
+    uniform float voxelSize;
+    uniform float splatScale;
+    uniform float screenHeight;
+    varying vec3 vColor;
+    varying float vAlpha;
+    void main() {
+      vColor = color;
+      vec4 mv = modelViewMatrix * vec4(position, 1.0);
+      gl_Position = projectionMatrix * mv;
+      float worldR = voxelSize * splatScale;
+      float pxR = (worldR * screenHeight) / (-mv.z * 2.0 * tan(0.5 * 0.7854));
+      gl_PointSize = clamp(pxR * 2.0, 3.0, 64.0);
+      vAlpha = smoothstep(1.5, 4.0, gl_PointSize);
+    }`;
+  const FRAG_SRC = `
+    varying vec3 vColor;
+    varying float vAlpha;
+    void main() {
+      vec2 uv = gl_PointCoord * 2.0 - 1.0;
+      float r2 = dot(uv, uv);
+      if (r2 > 1.0) discard;
+      float g = exp(-2.0 * r2);
+      gl_FragColor = vec4(vColor, g * vAlpha * 0.95);
+    }`;
+  const cloudMat = new THREE.ShaderMaterial({
+    uniforms: {
+      voxelSize:    { value: 0.10 },
+      splatScale:   { value: 0.9 },
+      screenHeight: { value: 800 }
+    },
+    vertexShader:   VERT_SRC,
+    fragmentShader: FRAG_SRC,
+    vertexColors: true,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.NormalBlending,
+  });
+  const cloud = new THREE.Points(cloudGeom, cloudMat);
+  scene.add(cloud);
+
+  // Solid voxel mesh view (InstancedMesh of small cubes, colored from cloud RGB).
+  // Gives a textured "real-world" look comparable to gz ground truth.
+  const MAX_VOXELS = 80000;
+  // Slight overlap (0.12 > 0.10 voxel grid) makes cubes touch → solid block look
+  const voxelGeom = new THREE.BoxGeometry(0.12, 0.12, 0.12);
+  const voxelMat = new THREE.MeshLambertMaterial({ vertexColors: false, flatShading: true });
+  const voxelMesh = new THREE.InstancedMesh(voxelGeom, voxelMat, MAX_VOXELS);
+  voxelMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  voxelMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(MAX_VOXELS * 3), 3);
+  voxelMesh.count = 0;
+  voxelMesh.visible = false;
+  scene.add(voxelMesh);
+  // Ambient + sun lighting so MeshLambert isn't black
+  scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.8);
+  sun.position.set(5, 5, 10);
+  scene.add(sun);
+
+  function resize() {
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    if (renderer.domElement.width !== w || renderer.domElement.height !== h) {
+      renderer.setSize(w, h, false);
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+    }
+  }
+
+  // Pose polling — full telemetry HUD
+  let lastPoseSeq = -1;
+  let fpsCount = 0, fpsT0 = performance.now();
+  let distTraveled = 0;
+  let lastPoseXY = null;
+  let hudRenderCount = 0;  // throttle HUD rebuild to 2 Hz (every 5 pollPose ticks)
+  async function pollPose() {
+    try {
+      const r = await fetch('/pose.json');
+      const p = await r.json();
+      if (p.seq !== lastPoseSeq) {
+        lastPoseSeq = p.seq;
+        rover.position.set(p.x, p.y, p.z + 0.25);
+        rover.quaternion.set(p.qx, p.qy, p.qz, p.qw);
+        if (trajCount < 20000) {
+          trajPos[trajCount * 3 + 0] = p.x;
+          trajPos[trajCount * 3 + 1] = p.y;
+          trajPos[trajCount * 3 + 2] = p.z + 0.05;
+          trajCount++;
+          trajGeom.setDrawRange(0, trajCount);
+          trajGeom.attributes.position.needsUpdate = true;
+        }
+        if (lastPoseXY !== null) {
+          distTraveled += Math.hypot(p.x - lastPoseXY[0], p.y - lastPoseXY[1]);
+        }
+        lastPoseXY = [p.x, p.y];
+        const yaw = Math.atan2(2*(p.qw*p.qz + p.qx*p.qy), 1 - 2*(p.qy*p.qy + p.qz*p.qz));
+        const yawDeg = (yaw * 180 / Math.PI).toFixed(1);
+        const pitch = Math.asin(2 * (p.qw * p.qy - p.qz * p.qx));
+        const roll = Math.atan2(2*(p.qw*p.qx + p.qy*p.qz), 1 - 2*(p.qx*p.qx + p.qy*p.qy));
+        const speed = (p.speed || 0).toFixed(2);
+        const vx = (p.vx || 0).toFixed(2), vy = (p.vy || 0).toFixed(2);
+        window._tel = window._tel || { startMs: Date.now() };
+        const uptimeS = ((Date.now() - window._tel.startMs)/1000) | 0;
+        const upH = (uptimeS / 3600) | 0;
+        const upM = ((uptimeS % 3600) / 60) | 0;
+        const upSec = uptimeS % 60;
+        const upStr = `${upH}:${String(upM).padStart(2,'0')}:${String(upSec).padStart(2,'0')}`;
+        const lmStr = (window._tel.lmCount !== undefined) ? `${window._tel.lmCount}` : '-';
+        const detF = window._tel.detFront ?? 0;
+        const detR = window._tel.detRear ?? 0;
+        const mode = window._tel.mode || 'WHEEL_DIRECT';
+        const cls = window._tel.classes || '-';
+        // MAVLink telemetry block (populated by pollTelem)
+        const mav = window._mav || {};
+        const mavConnected = !!mav.connected;
+        const mavMode = mav.mode || 'NO_LINK';
+        const mavModeColor = mavConnected ? '#3dffaa' : '#ff5555';
+        const armed = !!mav.armed;
+        const armedTxt = armed ? 'ARMED' : 'DISARMED';
+        const armedColor = armed ? '#ff5555' : '#888';
+        const battV = (mav.battery_v ?? 0).toFixed(2);
+        const battPct = mav.battery_pct ?? 0;
+        const battColor = battPct < 20 ? '#ff5555' : (battPct < 40 ? '#ffaa33' : '#3dffaa');
+        const homeDist = (mav.home_dist ?? 0).toFixed(2);
+        const gcsTxt = mav.gcs_link ? '● LINK' : '○ NO LINK';
+        const gcsColor = mav.gcs_link ? '#3dffaa' : '#ff5555';
+        const lastStatus = (mav.last_status || '').slice(0, 56);
+        const lastWarn = (mav.last_warning || '').slice(0, 56);
+        hudRenderCount++;
+        if (hudRenderCount % 5 !== 0) {
+          // Throttle HUD rebuild to 2 Hz (kill flicker from 10 Hz rewrite)
+          document.getElementById('stat-pose').textContent =
+            `pose: (${p.x.toFixed(2)}, ${p.y.toFixed(2)}) · ${speed} m/s · ${distTraveled.toFixed(0)} m`;
+          setTimeout(pollPose, 100);
+          return;
+        }
+        document.getElementById('pose-hud').innerHTML =
+          `<b style="color:#3dffaa">▶ SLAM_ROVER TELEMETRY</b><br>` +
+          `<b style="color:#9bb0c8">━ POSITION ━</b><br>` +
+          `<b>x</b>&nbsp;${p.x.toFixed(2)}m&nbsp; <b>y</b>&nbsp;${p.y.toFixed(2)}m&nbsp; <b>z</b>&nbsp;${p.z.toFixed(2)}m<br>` +
+          `<b style="color:#9bb0c8">━ ATTITUDE ━</b><br>` +
+          `<b>yaw</b>&nbsp;${yawDeg}°&nbsp; <b>pitch</b>&nbsp;${(pitch*180/Math.PI).toFixed(1)}°&nbsp; <b>roll</b>&nbsp;${(roll*180/Math.PI).toFixed(1)}°<br>` +
+          `<b style="color:#9bb0c8">━ VELOCITY ━</b><br>` +
+          `<b>speed</b>&nbsp;<span style="color:#ffee33">${speed} m/s</span>&nbsp; <b>vx</b>&nbsp;${vx}&nbsp; <b>vy</b>&nbsp;${vy}<br>` +
+          `<b>dist</b>&nbsp;${distTraveled.toFixed(1)}m&nbsp; <b>uptime</b>&nbsp;${upStr}<br>` +
+          `<b style="color:#9bb0c8">━ DETECTIONS ━</b><br>` +
+          `<b>front</b>&nbsp;${detF}&nbsp; <b>rear</b>&nbsp;${detR}<br>` +
+          `<b style="color:#9bb0c8">━ MAP ━</b><br>` +
+          `<b>landmarks</b>&nbsp;<span style="color:#3dffaa">${lmStr}</span><br>` +
+          `<b style="color:#9bb0c8">━ MODE ━</b><br>` +
+          `<b>ctrl</b>&nbsp;<span style="color:#ff7733">${mode}</span><br>` +
+          `<b>classes</b>&nbsp;${cls}<br>` +
+          `<b style="color:#9bb0c8">━ MAVLINK / PX4 ━</b><br>` +
+          `<b>mode</b>&nbsp;<span style="color:${mavModeColor}">${mavMode}</span>&nbsp; ` +
+          `<span style="color:${armedColor}"><b>${armedTxt}</b></span><br>` +
+          `<b>batt</b>&nbsp;<span style="color:${battColor}">${battV}V (${battPct}%)</span>&nbsp; ` +
+          `<b>home</b>&nbsp;${homeDist}m<br>` +
+          `<b>gcs</b>&nbsp;<span style="color:${gcsColor}">${gcsTxt}</span><br>` +
+          (lastWarn ? `<b style="color:#ffaa33">⚠</b>&nbsp;<span style="color:#ffaa33">${lastWarn}</span><br>` : '') +
+          (lastStatus && lastStatus !== lastWarn ? `<b>msg</b>&nbsp;<span style="color:#aac">${lastStatus}</span><br>` : '') +
+          `<b>seq</b>&nbsp;${p.seq}`;
+        document.getElementById('stat-pose').textContent =
+          `pose: (${p.x.toFixed(2)}, ${p.y.toFixed(2)}) · ${speed} m/s · ${distTraveled.toFixed(0)} m`;
+      }
+    } catch(e) { /* swallow */ }
+    setTimeout(pollPose, 100);
+  }
+
+  // MAVLink telemetry polling — reads /telem.json (populated by mavlink_telem.py)
+  async function pollTelem() {
+    try {
+      const r = await fetch('/telem.json');
+      const t = await r.json();
+      // Mark stale if updated_ms older than 4s
+      if (t.updated_ms && (Date.now() - t.updated_ms) > 4000) {
+        t.connected = false;
+        t.gcs_link = false;
+      }
+      window._mav = t;
+    } catch(e) { window._mav = window._mav || {}; }
+    setTimeout(pollTelem, 1000);
+  }
+  pollTelem();
+
+  // Pointcloud polling — fetch positions + RGB together and only apply when
+  // both report the same X-Cloud-Seq (prevents the brief "uncoloured/empty"
+  // glitch when the snapshot is mid-swap on the server).
+  let lastCloudSeq = '';
+  async function pollCloud() {
+    try {
+      const [r1, r2] = await Promise.all([
+        fetch('/cloud.bin'),
+        fetch('/cloud_rgb.bin'),
+      ]);
+      const seq1 = r1.headers.get('X-Cloud-Seq') || '';
+      const seq2 = r2.headers.get('X-Cloud-Seq') || '';
+      if (seq1 !== seq2 || seq1 === lastCloudSeq) {
+        setTimeout(pollCloud, 250); return;
+      }
+      const pbuf = await r1.arrayBuffer();
+      const cbuf = await r2.arrayBuffer();
+      const pos = new Float32Array(pbuf);
+      const cbytes = new Uint8Array(cbuf);
+      if (pos.length * 1 !== cbytes.length) {
+        // length mismatch — drop this pair, retry soon
+        setTimeout(pollCloud, 250); return;
+      }
+      lastCloudSeq = seq1;
+      const cf = new Float32Array(cbytes.length);
+      for (let i = 0; i < cbytes.length; i++) cf[i] = cbytes[i] / 255.0;
+      cloudGeom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      cloudGeom.setAttribute('color', new THREE.BufferAttribute(cf, 3));
+      cloudGeom.computeBoundingSphere();
+      // Populate instanced voxel mesh — but cull interior voxels (those with
+      // all 6 face-neighbours present) so we only render the surface shell.
+      // Result: Minecraft-style solid surface that looks like a real 3D scan
+      // instead of a scattered point cloud.
+      const VOX = 0.10;
+      const nIn = pos.length / 3 | 0;
+      const keySet = new Set();
+      for (let i = 0; i < nIn; i++) {
+        const kx = Math.round(pos[i*3] / VOX);
+        const ky = Math.round(pos[i*3+1] / VOX);
+        const kz = Math.round(pos[i*3+2] / VOX);
+        keySet.add(kx + ',' + ky + ',' + kz);
+      }
+      const mtx = new THREE.Matrix4();
+      let out = 0;
+      for (let i = 0; i < nIn && out < MAX_VOXELS; i++) {
+        const kx = Math.round(pos[i*3] / VOX);
+        const ky = Math.round(pos[i*3+1] / VOX);
+        const kz = Math.round(pos[i*3+2] / VOX);
+        // Surface test: at least one of 6 neighbours missing
+        const surface =
+          !keySet.has((kx+1)+','+ky+','+kz) ||
+          !keySet.has((kx-1)+','+ky+','+kz) ||
+          !keySet.has(kx+','+(ky+1)+','+kz) ||
+          !keySet.has(kx+','+(ky-1)+','+kz) ||
+          !keySet.has(kx+','+ky+','+(kz+1)) ||
+          !keySet.has(kx+','+ky+','+(kz-1));
+        if (!surface) continue;
+        mtx.makeTranslation(pos[i*3], pos[i*3+1], pos[i*3+2]);
+        voxelMesh.setMatrixAt(out, mtx);
+        voxelMesh.instanceColor.setXYZ(out, cf[i*3], cf[i*3+1], cf[i*3+2]);
+        out++;
+      }
+      voxelMesh.count = out;
+      voxelMesh.instanceMatrix.needsUpdate = true;
+      voxelMesh.instanceColor.needsUpdate = true;
+      document.getElementById('stat-cloud').textContent =
+        `cloud: ${pos.length/3 | 0} pts (RGB)`;
+      fpsCount++;
+    } catch (e) {}
+    setTimeout(pollCloud, 500);
+  }
+
+  function loop() {
+    resize();
+    controls.update();
+    renderer.render(scene, camera);
+    const now = performance.now();
+    if (now - fpsT0 > 1000) {
+      document.getElementById('stat-fps').textContent = `map fps: ${fpsCount}`;
+      fpsCount = 0; fpsT0 = now;
+    }
+    requestAnimationFrame(loop);
+  }
+
+  // Occupancy-grid + path polling
+  let mapMeta = null;
+  async function pollMap() {
+    try {
+      if (!mapMeta) {
+        mapMeta = await (await fetch('/map_meta.json')).json();
+      }
+      const buf = await (await fetch('/map.bin')).arrayBuffer();
+      const arr = new Int8Array(buf);
+      const W = mapMeta.w, H = mapMeta.h;
+      const img = gridCtx.createImageData(W, H);
+      for (let j = 0; j < H; j++) {
+        for (let i = 0; i < W; i++) {
+          const v = arr[j * W + i];
+          let r = 30, g = 40, b = 55, a = 80;  // unknown grey
+          if (v === 0) { r = 80; g = 140; b = 100; a = 60; }     // free greenish
+          else if (v === 100) { r = 230; g = 60; b = 60; a = 220; }  // occupied red
+          // PlaneGeometry default UV: (0,0)=bottom-left. Our grid origin
+          // maps cell(0,0) to (-10,-10). World y-up matches image-up if we
+          // write row j directly. But canvas y is top-down -> flip.
+          const dst = ((H - 1 - j) * W + i) * 4;
+          img.data[dst] = r; img.data[dst + 1] = g;
+          img.data[dst + 2] = b; img.data[dst + 3] = a;
+        }
+      }
+      gridCtx.putImageData(img, 0, 0);
+      gridTex.needsUpdate = true;
+    } catch (e) {}
+    setTimeout(pollMap, 500);
+  }
+  async function pollPath() {
+    try {
+      const j = await (await fetch('/path.json')).json();
+      const wpts = j.waypoints || [];
+      if (wpts.length < 2) {
+        pathGeom.setAttribute('position',
+            new THREE.BufferAttribute(new Float32Array(0), 3));
+      } else {
+        const arr = new Float32Array(wpts.length * 3);
+        for (let k = 0; k < wpts.length; k++) {
+          arr[k * 3 + 0] = wpts[k][0];
+          arr[k * 3 + 1] = wpts[k][1];
+          arr[k * 3 + 2] = 0.05;
+        }
+        pathGeom.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+      }
+      pathGeom.attributes.position.needsUpdate = true;
+    } catch (e) {}
+    setTimeout(pollPath, 300);
+  }
+
+  // Target polling
+  async function pollTarget() {
+    try {
+      const r = await fetch('/target.json');
+      const t = await r.json();
+      if (t.active) {
+        targetGroup.position.set(t.x, t.y, 0);
+        targetGroup.visible = true;
+        document.getElementById('stat-target').textContent =
+          `target: (${t.x.toFixed(2)}, ${t.y.toFixed(2)})`;
+      } else {
+        targetGroup.visible = false;
+        document.getElementById('stat-target').textContent = 'target: none';
+      }
+    } catch(e) { /* swallow */ }
+    setTimeout(pollTarget, 250);
+  }
+
+  // Detection list polling — merge front + rear
+  async function pollDetections() {
+    try {
+      const [rf, rr] = await Promise.all([
+        fetch('http://localhost:8081/front/detections.json').then(r => r.json()).catch(() => ({detections:[]})),
+        fetch('http://localhost:8081/rear/detections.json').then(r => r.json()).catch(() => ({detections:[]})),
+      ]);
+      window._tel = window._tel || {};
+      window._tel.detFront = (rf.detections || []).length;
+      window._tel.detRear  = (rr.detections || []).length;
+      const ul = document.getElementById('det-list');
+      const all = []
+        .concat((rf.detections || []).map(d => ({...d, cam: 'F'})))
+        .concat((rr.detections || []).map(d => ({...d, cam: 'R'})));
+      // Classes counts string for HUD
+      const classCounts = {};
+      all.forEach(d => { classCounts[d.cls] = (classCounts[d.cls]||0) + 1; });
+      window._tel.classes = Object.keys(classCounts).length
+        ? Object.entries(classCounts).map(([c,n]) => `${c}×${n}`).join(' ')
+        : '-';
+      if (all.length === 0) {
+        ul.innerHTML = '<li style="color:#5f7592">no objects detected</li>';
+      } else {
+        ul.innerHTML = all
+          .sort((a,b)=>b.conf-a.conf)
+          .map(d => `<li><span style="color:#6ad1ff">[${d.cam}]</span> <span style="color:#3dffaa">${d.cls}</span> · ${(d.conf*100).toFixed(0)}%</li>`)
+          .join('');
+      }
+    } catch(e) { /* swallow */ }
+    setTimeout(pollDetections, 500);
+  }
+
+  // ===== Config sliders =====
+  const CFG_FIELDS = [
+    {key:'fwd_speed',           label:'fwd speed (m/s)',     min:0.1, max:5,  step:0.1},
+    {key:'max_yaw_rate_deg',    label:'max yaw rate (°/s)',  min:10,  max:180, step:5},
+    {key:'search_yaw_rate_deg', label:'search yaw rate (°/s)',min:5,  max:120, step:5},
+    {key:'approach_yaw_gain',   label:'approach yaw gain',   min:0.1, max:3,  step:0.05},
+    {key:'follow_yaw_gain',     label:'follow yaw gain',     min:0.1, max:3,  step:0.05},
+    {key:'approach_stop_ratio', label:'approach->follow @ bbox', min:0.10, max:0.80, step:0.02},
+    {key:'follow_goal_low',     label:'follow goal LOW (bbox)',  min:0.05, max:0.50, step:0.02},
+    {key:'follow_goal_high',    label:'follow goal HIGH (bbox)', min:0.10, max:0.80, step:0.02},
+    {key:'lost_timeout',        label:'lost timeout (s)',    min:0.5, max:15, step:0.5},
+  ];
+  const cfgRows = document.getElementById('cfg-rows');
+  CFG_FIELDS.forEach(f => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:grid;grid-template-columns:140px 1fr 50px;gap:6px;align-items:center;margin:3px 0';
+    row.innerHTML = `<label>${f.label}</label>
+      <input type="range" id="cfg-${f.key}" min="${f.min}" max="${f.max}" step="${f.step}" style="width:100%">
+      <span id="cfg-${f.key}-val" style="color:#3dffaa;text-align:right">--</span>`;
+    cfgRows.appendChild(row);
+  });
+  function applyCfgToUI(j) {
+    CFG_FIELDS.forEach(f => {
+      const el = document.getElementById('cfg-'+f.key);
+      const sp = document.getElementById('cfg-'+f.key+'-val');
+      if (j[f.key] !== undefined) {
+        el.value = j[f.key];
+        sp.textContent = (+j[f.key]).toFixed(f.step < 0.1 ? 2 : 1);
+      }
+    });
+  }
+  let cfgDirtyT = 0;
+  function pushCfg(key, val) {
+    fetch(`/config?${key}=${val}`, {method:'POST'});
+  }
+  CFG_FIELDS.forEach(f => {
+    const el = document.getElementById('cfg-'+f.key);
+    const sp = document.getElementById('cfg-'+f.key+'-val');
+    el.addEventListener('input', () => {
+      sp.textContent = (+el.value).toFixed(f.step < 0.1 ? 2 : 1);
+      cfgDirtyT = performance.now();
+      pushCfg(f.key, el.value);
+    });
+  });
+  document.getElementById('cfg-reset').addEventListener('click', () => {
+    const defaults = {fwd_speed:2.0, max_yaw_rate_deg:45, search_yaw_rate_deg:35,
+      approach_yaw_gain:0.6, follow_yaw_gain:0.8, approach_stop_ratio:0.30,
+      follow_goal_low:0.25, follow_goal_high:0.40, lost_timeout:4.0};
+    Object.entries(defaults).forEach(([k,v]) => pushCfg(k, v));
+    applyCfgToUI(defaults);
+  });
+  async function pollCfg() {
+    try {
+      // Skip pull while user is actively dragging
+      if (performance.now() - cfgDirtyT > 800) {
+        const r = await fetch('/config.json');
+        const j = await r.json();
+        applyCfgToUI(j);
+      }
+    } catch (e) {}
+    setTimeout(pollCfg, 1000);
+  }
+
+  // Landmark polling — rebuild scene from /landmarks.json
+  async function pollLandmarks() {
+    try {
+      const r = await fetch('/landmarks.json');
+      const j = await r.json();
+      window._tel = window._tel || {};
+      const locked = (j.items || []).filter(l => l.locked).length;
+      window._tel.lmCount = `${(j.items || []).length} (${locked} locked)`;
+      // Clear group + rebuild
+      while (landmarkGroup.children.length) {
+        const c = landmarkGroup.children.pop();
+        if (c.material) c.material.dispose();
+        if (c.geometry) c.geometry.dispose();
+      }
+      // Class-sized 3D bbox priors (SA-LOAM style).
+      const CLASS_SIZE = {
+        person: [0.5, 0.5, 1.75],
+        car:    [4.0, 2.0, 1.5],
+        truck:  [4.5, 2.2, 2.0],
+        bus:    [6.0, 2.5, 2.5],
+        bicycle:[1.6, 0.5, 1.1],
+        motorcycle:[1.6, 0.5, 1.1],
+        cone:   [0.3, 0.3, 0.6],
+        'stop sign': [0.5, 0.05, 1.8],
+        'traffic light': [0.3, 0.3, 0.9],
+        'fire hydrant': [0.3, 0.3, 0.7],
+        bench:  [1.5, 0.4, 0.5],
+        dog:    [1.0, 0.4, 0.6],
+        cat:    [0.5, 0.2, 0.3],
+        chair:  [0.5, 0.5, 0.9],
+      };
+      (j.items || []).forEach(lm => {
+        const color = CLASS_COLORS[lm.cls] || 0xaaaaaa;
+        const size = CLASS_SIZE[lm.cls] || [0.4, 0.4, 0.8];
+        // Filled box (semi-transparent), edge wireframe, label, lock marker
+        const box = new THREE.Mesh(
+          new THREE.BoxGeometry(size[0], size[1], size[2]),
+          new THREE.MeshStandardMaterial({
+            color: color, emissive: color, emissiveIntensity: lm.locked ? 0.45 : 0.20,
+            transparent: true, opacity: lm.locked ? 0.55 : 0.35,
+          })
+        );
+        box.position.set(lm.x, lm.y, size[2] / 2);
+        landmarkGroup.add(box);
+        // Edge wireframe in pure colour
+        const edges = new THREE.EdgesGeometry(box.geometry);
+        const lines = new THREE.LineSegments(
+          edges,
+          new THREE.LineBasicMaterial({ color: color, linewidth: 2 })
+        );
+        lines.position.copy(box.position);
+        landmarkGroup.add(lines);
+        // Label with class + (x, y) coordinates + lock indicator
+        const lockTag = lm.locked ? '[L]' : '·';
+        const label = makeLabelSprite(
+          `${lm.cls} ${lockTag} (${lm.x.toFixed(1)},${lm.y.toFixed(1)})`,
+          color);
+        label.position.set(lm.x, lm.y, size[2] + 0.5);
+        landmarkGroup.add(label);
+      });
+    } catch (e) {}
+    setTimeout(pollLandmarks, 800);
+  }
+
+  // Investigate state polling
+  async function pollInvest() {
+    try {
+      const r = await fetch('/investigate.json');
+      const j = await r.json();
+      const txt = j.active ? `invest: ${j.cls} · ${j.state}` : 'invest: idle';
+      document.getElementById('stat-invest').textContent = txt;
+    } catch(e) { /* swallow */ }
+    setTimeout(pollInvest, 400);
+  }
+
+  // ===== Gaussian Splat viewer (mkkellogg/GaussianSplats3D) =====
+  let splatViewer = null;
+  let splatOn = false;
+  let splatTimer = null;
+  let splatBlobURL = null;
+  let splatLoading = false;
+  let splatLibPromise = null;
+
+  function loadSplatLib() {
+    if (!splatLibPromise) {
+      splatLibPromise = import('@mkkellogg/gaussian-splats-3d').catch(err => {
+        console.warn('[splat] mkkellogg lib load failed:', err);
+        splatLibPromise = null;
+        throw err;
+      });
+    }
+    return splatLibPromise;
+  }
+
+  async function refreshSplat() {
+    if (!splatOn || splatLoading) return;
+    splatLoading = true;
+    try {
+      const GS = await loadSplatLib();
+      const resp = await fetch('/splat.bin', { cache: 'no-store' });
+      if (!resp.ok) { splatLoading = false; return; }
+      const buf = await resp.arrayBuffer();
+      if (buf.byteLength < 32) { splatLoading = false; return; }
+      if (!splatViewer) {
+        splatViewer = new GS.Viewer({
+          selfDrivenMode: false,
+          useBuiltInControls: false,
+          renderer: renderer,
+          camera: camera,
+          threeScene: scene,
+          sharedMemoryForWorkers: false,
+          gpuAcceleratedSort: false,
+          dynamicScene: true,
+        });
+      } else {
+        try { await splatViewer.removeSplatScene(0); } catch(_) {}
+      }
+      if (splatBlobURL) { URL.revokeObjectURL(splatBlobURL); splatBlobURL = null; }
+      splatBlobURL = URL.createObjectURL(new Blob([buf], { type: 'application/octet-stream' }));
+      await splatViewer.addSplatScene(splatBlobURL, {
+        format: 0,            // .splat
+        showLoadingUI: false,
+        position: [0, 0, 0],
+        rotation: [0, 0, 0, 1],
+        scale: [1, 1, 1],
+      });
+    } catch (e) {
+      console.warn('[splat] refresh failed:', e);
+    } finally {
+      splatLoading = false;
+    }
+  }
+
+  async function setSplatVisible(on) {
+    splatOn = on;
+    const btn = document.getElementById('btn-splat-view');
+    btn.style.background = on ? '#3dffaa' : '#1f2937';
+    btn.style.color      = on ? '#0b0d11' : '#e6edf3';
+    if (on) {
+      // Hide point cloud + meshes while splats render
+      if (typeof cloud !== 'undefined' && cloud) cloud.visible = false;
+      if (typeof tsdfMesh !== 'undefined' && tsdfMesh) tsdfMesh.visible = false;
+      if (typeof triMesh !== 'undefined' && triMesh) triMesh.visible = false;
+      await refreshSplat();
+      if (splatTimer) clearInterval(splatTimer);
+      splatTimer = setInterval(refreshSplat, 10000);
+    } else {
+      if (splatTimer) { clearInterval(splatTimer); splatTimer = null; }
+      if (splatViewer) {
+        try { await splatViewer.removeSplatScene(0); } catch(_) {}
+      }
+      if (splatBlobURL) { URL.revokeObjectURL(splatBlobURL); splatBlobURL = null; }
+      if (typeof cloud !== 'undefined' && cloud) cloud.visible = true;
+    }
+  }
+  document.getElementById('btn-splat-view').addEventListener('click', () => {
+    setSplatVisible(!splatOn);
+  });
+
+  pollPose();
+  pollCloud();
+  pollTarget();
+  pollDetections();
+  pollInvest();
+  pollCfg();
+  pollLandmarks();
+  pollMap();
+  pollPath();
+  loop();
+</script>
+</body>
+</html>

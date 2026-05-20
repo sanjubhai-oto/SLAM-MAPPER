@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>rover_bringup</name>
+  <version>0.1.0</version>
+  <description>Bringup for PX4 SITL rover_360cam + stella_vslam.</description>
+  <maintainer email="otonomyrobotics@gmail.com">Sanjay</maintainer>
+  <license>MIT</license>
+
+  <exec_depend>ros_gz_bridge</exec_depend>
+  <exec_depend>ros_gz_image</exec_depend>
+  <exec_depend>image_transport</exec_depend>
+  <exec_depend>cv_bridge</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

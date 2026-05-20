@@ -1,0 +1,22 @@
+# Build artifacts
+webui/build/
+*.o
+*.so
+*.dylib
+
+# Datasets (too large for git)
+datasets/
+state/weights/slamrover_v1/
+state/splats/
+state/landmarks.json
+state/landmarks.json.bak.*
+
+# Snapshots (binary, large)
+snapshots/
+
+# Logs
+*.log
+/tmp/
+
+# PX4 boot lock
+*.lock
